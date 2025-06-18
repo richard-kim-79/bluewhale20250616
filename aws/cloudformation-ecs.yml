@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'BlueWhale 2025 ECS Fargate 배포 스택'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: staging
+    Description: 배포 환경 (staging 또는 production)
+    AllowedValues:
+      - staging
+      - production
+  
+  ECRRepositoryName:
+    Type: String
+    Default: bluewhale-backend
+    Description: ECR 저장소 이름
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: 서브넷 ID 목록
+
+Resources:
+  # ECR 저장소
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepositoryName
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "최근 10개 이미지만 유지",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # ECS 클러스터
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub bluewhale-${EnvironmentName}-${AWS::StackName}
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # 로그 그룹
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/bluewhale-${EnvironmentName}-backend
+      RetentionInDays: 30
+
+  CeleryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/bluewhale-${EnvironmentName}-celery
+      RetentionInDays: 30
+
+  # ECS 태스크 실행 역할
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/*
+
+  # 보안 그룹
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: 0.0.0.0/0
+
+  # ECS 태스크 정의
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub bluewhale-${EnvironmentName}-backend
+      Cpu: '2048'
+      Memory: '4096'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: bluewhale-backend
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryName}:latest-${EnvironmentName}
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+              HostPort: 8000
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BackendLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref EnvironmentName
+          Secrets:
+            - Name: MONGODB_URI
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/mongodb-uri
+            - Name: REDIS_URL
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/redis-url
+            - Name: QDRANT_URL
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/qdrant-url
+            - Name: QDRANT_API_KEY
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/qdrant-api-key
+            - Name: QDRANT_COLLECTION_NAME
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/qdrant-collection
+            - Name: AWS_ACCESS_KEY_ID
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-access-key
+            - Name: AWS_SECRET_ACCESS_KEY
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-secret-key
+            - Name: AWS_REGION
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-region
+            - Name: S3_BUCKET_NAME
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-bucket
+            - Name: JWT_SECRET
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/jwt-secret
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8000/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+          Cpu: 1024
+          Memory: 2048
+        - Name: redis
+          Image: redis:7.0-alpine
+          Essential: true
+          PortMappings:
+            - ContainerPort: 6379
+              HostPort: 6379
+              Protocol: tcp
+          HealthCheck:
+            Command:
+              - CMD
+              - redis-cli
+              - ping
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+          Cpu: 256
+          Memory: 512
+        - Name: celery-worker
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryName}:latest-${EnvironmentName}
+          Essential: true
+          Command:
+            - celery
+            - -A
+            - app.worker
+            - worker
+            - --loglevel=info
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CeleryLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref EnvironmentName
+          Secrets:
+            - Name: MONGODB_URI
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/mongodb-uri
+            - Name: REDIS_URL
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/redis-url
+            - Name: QDRANT_URL
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/qdrant-url
+            - Name: QDRANT_API_KEY
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/qdrant-api-key
+            - Name: QDRANT_COLLECTION_NAME
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/qdrant-collection
+            - Name: AWS_ACCESS_KEY_ID
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-access-key
+            - Name: AWS_SECRET_ACCESS_KEY
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-secret-key
+            - Name: AWS_REGION
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-region
+            - Name: S3_BUCKET_NAME
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:bluewhale/${EnvironmentName}/s3-bucket
+          Cpu: 512
+          Memory: 1024
+          DependsOn:
+            - ContainerName: redis
+              Condition: HEALTHY
+
+  # 로드 밸런서
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub bluewhale-${EnvironmentName}-lb
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref ECSSecurityGroup
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+
+  # 타겟 그룹
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub bluewhale-${EnvironmentName}-tg
+      Port: 8000
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+
+  # 리스너
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # ECS 서비스
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: !Sub bluewhale-${EnvironmentName}-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: bluewhale-backend
+          ContainerPort: 8000
+          TargetGroupArn: !Ref TargetGroup
+      HealthCheckGracePeriodSeconds: 120
+
+Outputs:
+  ClusterName:
+    Description: ECS 클러스터 이름
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterName
+
+  ServiceName:
+    Description: ECS 서비스 이름
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub ${AWS::StackName}-ServiceName
+
+  LoadBalancerDNS:
+    Description: 로드 밸런서 DNS 이름
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-LoadBalancerDNS
+
+  ECRRepositoryURI:
+    Description: ECR 저장소 URI
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryName}
+    Export:
+      Name: !Sub ${AWS::StackName}-ECRRepositoryURI

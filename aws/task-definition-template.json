@@ -1,0 +1,182 @@
+{
+  "family": "bluewhale-backend",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "containerDefinitions": [
+    {
+      "name": "bluewhale-backend",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/bluewhale-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bluewhale-backend",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "environment": [
+        {
+          "name": "ENVIRONMENT",
+          "value": "ENVIRONMENT_VALUE"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "MONGODB_URI",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/mongodb-uri"
+        },
+        {
+          "name": "REDIS_URL",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/redis-url"
+        },
+        {
+          "name": "QDRANT_URL",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/qdrant-url"
+        },
+        {
+          "name": "QDRANT_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/qdrant-api-key"
+        },
+        {
+          "name": "QDRANT_COLLECTION_NAME",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/qdrant-collection"
+        },
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-access-key"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-secret-key"
+        },
+        {
+          "name": "AWS_REGION",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-region"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-bucket"
+        },
+        {
+          "name": "JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/jwt-secret"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -f http://localhost:8000/health || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "cpu": 1024,
+      "memory": 2048
+    },
+    {
+      "name": "redis",
+      "image": "redis:7.0-alpine",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 6379,
+          "hostPort": 6379,
+          "protocol": "tcp"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3
+      },
+      "cpu": 256,
+      "memory": 512
+    },
+    {
+      "name": "celery-worker",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/bluewhale-backend:latest",
+      "essential": true,
+      "command": ["celery", "-A", "app.worker", "worker", "--loglevel=info"],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bluewhale-celery",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "environment": [
+        {
+          "name": "ENVIRONMENT",
+          "value": "ENVIRONMENT_VALUE"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "MONGODB_URI",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/mongodb-uri"
+        },
+        {
+          "name": "REDIS_URL",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/redis-url"
+        },
+        {
+          "name": "QDRANT_URL",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/qdrant-url"
+        },
+        {
+          "name": "QDRANT_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/qdrant-api-key"
+        },
+        {
+          "name": "QDRANT_COLLECTION_NAME",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/qdrant-collection"
+        },
+        {
+          "name": "AWS_ACCESS_KEY_ID",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-access-key"
+        },
+        {
+          "name": "AWS_SECRET_ACCESS_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-secret-key"
+        },
+        {
+          "name": "AWS_REGION",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-region"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:bluewhale/ENVIRONMENT_VALUE/s3-bucket"
+        }
+      ],
+      "cpu": 512,
+      "memory": 1024,
+      "dependsOn": [
+        {
+          "containerName": "redis",
+          "condition": "HEALTHY"
+        }
+      ]
+    }
+  ],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "2048",
+  "memory": "4096"
+}
