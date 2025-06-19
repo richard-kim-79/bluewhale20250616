@@ -19,7 +19,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       # 기본 환경 변수 설정
       - name: Set basic environment variables
@@ -28,6 +28,7 @@ jobs:
           echo "ECS_CLUSTER=bluewhale-staging" >> $GITHUB_ENV
           echo "ECS_SERVICE=bluewhale-backend-staging" >> $GITHUB_ENV
           echo "ECR_REPOSITORY=bluewhale-backend" >> $GITHUB_ENV
+          echo "ECR_REGISTRY=829734436121.dkr.ecr.us-west-2.amazonaws.com" >> $GITHUB_ENV
 
       # 디버그용 - AWS 자격 증명 테스트
       - name: Debug - Verify AWS credentials
@@ -38,20 +39,22 @@ jobs:
       # ECR 로그인
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Build a docker container and push it to ECR
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }} -t $ECR_REGISTRY/$ECR_REPOSITORY:latest-$ENV_NAME ./backend
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest-$ENV_NAME
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}" >> $GITHUB_OUTPUT
+          # 도커 이미지 빌드 및 푸시
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./backend
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest-$ENV_NAME" >> $GITHUB_OUTPUT
 
       - name: Render Amazon ECS task definition
         id: render-task-definition
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        uses: aws-actions/amazon-ecs-render-task-definition@v2
         with:
           task-definition: ./aws/task-definition-template.json
           container-name: bluewhale-backend
@@ -59,7 +62,7 @@ jobs:
 
       - name: Deploy to Amazon ECS
         id: deploy-ecs
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.render-task-definition.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
