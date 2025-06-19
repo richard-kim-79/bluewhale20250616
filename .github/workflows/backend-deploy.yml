@@ -11,14 +11,10 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    # AWS 자격 증명을 위한 권한 설정
-    permissions:
-      id-token: write
-      contents: read
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
       # 기본 환경 변수 설정
       - name: Set basic environment variables
@@ -29,11 +25,12 @@ jobs:
           echo "ECS_SERVICE=bluewhale-backend-staging" >> $GITHUB_ENV
           echo "ECR_REPOSITORY=bluewhale-backend" >> $GITHUB_ENV
 
-      # AWS 자격 증명 설정 - 최신 버전 사용
+      # AWS 자격 증명 설정 - 안정적인 v1 버전 사용
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v1
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-2
 
       # 디버그용 - AWS 자격 증명 테스트
