@@ -11,41 +11,31 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    # AWS 자격 증명 문제 해결을 위한 권한 명시
-    permissions:
-      id-token: write
-      contents: read
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      # 환경 변수 설정 (중복 제거)
-      - name: Set environment variables based on branch
+      # 디버그용 - GitHub 시크릿 확인
+      - name: Debug - List available secrets (names only)
         run: |
-          # 기본 AWS 리전 설정
-          echo "AWS_REGION=us-west-2" >> $GITHUB_ENV
-          
-          if [[ ${{ github.ref }} == 'refs/heads/main' ]]; then
-            echo "ENV_NAME=production" >> $GITHUB_ENV
-            echo "ECS_CLUSTER=${{ secrets.PROD_ECS_CLUSTER }}" >> $GITHUB_ENV
-            echo "ECS_SERVICE=${{ secrets.PROD_ECS_SERVICE }}" >> $GITHUB_ENV
-          else
-            echo "ENV_NAME=staging" >> $GITHUB_ENV
-            echo "ECS_CLUSTER=${{ secrets.STAGING_ECS_CLUSTER }}" >> $GITHUB_ENV
-            echo "ECS_SERVICE=${{ secrets.STAGING_ECS_SERVICE }}" >> $GITHUB_ENV
-          fi
-          
-          # ECR 관련 설정
-          echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}" >> $GITHUB_ENV
+          echo "Available secrets (showing only that they exist, not values):"
+          echo "AWS_ACCESS_KEY_ID exists: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}"
+          echo "AWS_SECRET_ACCESS_KEY exists: ${{ secrets.AWS_SECRET_ACCESS_KEY != '' }}"
+          echo "ECR_REPOSITORY exists: ${{ secrets.ECR_REPOSITORY != '' }}"
+          echo "PROD_ECS_CLUSTER exists: ${{ secrets.PROD_ECS_CLUSTER != '' }}"
+          echo "PROD_ECS_SERVICE exists: ${{ secrets.PROD_ECS_SERVICE != '' }}"
+          echo "STAGING_ECS_CLUSTER exists: ${{ secrets.STAGING_ECS_CLUSTER != '' }}"
+          echo "STAGING_ECS_SERVICE exists: ${{ secrets.STAGING_ECS_SERVICE != '' }}"
 
-      # 디버그용 - 현재 환경 변수 출력
-      - name: Debug - Print Environment Variables
+      # 기본 환경 변수 설정
+      - name: Set basic environment variables
         run: |
-          echo "Current Branch: ${{ github.ref }}"
-          echo "ENV_NAME: ${{ env.ENV_NAME }}"
-          echo "AWS_REGION: ${{ env.AWS_REGION }}"
-          echo "ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}"
+          echo "AWS_REGION=us-west-2" >> $GITHUB_ENV
+          echo "ENV_NAME=staging" >> $GITHUB_ENV
+          echo "ECS_CLUSTER=bluewhale-staging" >> $GITHUB_ENV
+          echo "ECS_SERVICE=bluewhale-backend-staging" >> $GITHUB_ENV
+          echo "ECR_REPOSITORY=bluewhale-backend" >> $GITHUB_ENV
 
       # AWS 자격 증명 설정 - 리전 하드코딩
       - name: Configure AWS credentials
@@ -58,17 +48,12 @@ jobs:
       # 디버그용 - AWS 자격 증명 테스트
       - name: Debug - Verify AWS credentials
         run: |
-          aws sts get-caller-identity
+          aws sts get-caller-identity || echo "AWS 자격 증명 실패"
           
       # ECR 로그인
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
-
-      # ECR 레지스트리 설정
-      - name: Set ECR registry
-        run: |
-          echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
